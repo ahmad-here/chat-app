@@ -1,9 +1,11 @@
 /** Domain types, mirroring the data model in docs/requirements.md §4.
  *
- * These describe the shape the UI consumes. Persistence types (MongoDB
- * documents, ObjectId) are deliberately not modelled here — the UI should not
- * depend on the storage layer, and the ODM-vs-raw-driver question is still open
- * (docs/architecture.md §9). Ids are plain strings at this boundary. */
+ * The UI-facing types use plain string ids and never carry secrets. The
+ * persistence shapes (ObjectId, passwordHash) are separated below so a
+ * `passwordHash` can't leak into a component by accident — the type system
+ * stops it rather than a code review. */
+
+import type { ObjectId } from "mongodb";
 
 /** Who authored a message. `assistant` is the AI, not a user. */
 export type MessageRole = "user" | "assistant";
@@ -34,4 +36,35 @@ export interface Message {
   content: string;
   /** ISO 8601. Ordering key. */
   createdAt: string;
+}
+
+/* ---------- Persistence shapes (server-only) ---------- */
+
+/** A user as stored in MongoDB.
+ *
+ * Distinct from `User` because it carries `passwordHash`. Never return this
+ * from a Server Component or route handler — map to `User` first. */
+export interface UserDoc {
+  _id: ObjectId;
+  email: string;
+  name: string;
+  /** Absent for accounts created via Google — those have no password. */
+  passwordHash?: string;
+  image?: string | null;
+  createdAt: Date;
+}
+
+/* ---------- Auth.js module augmentation ---------- */
+
+/** Auth.js's default Session has no `user.id`. The jwt/session callbacks in
+ *  auth.config.ts put it there, so the type has to say so. */
+declare module "next-auth" {
+  interface Session {
+    user: {
+      id: string;
+      name?: string | null;
+      email?: string | null;
+      image?: string | null;
+    };
+  }
 }

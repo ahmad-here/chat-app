@@ -2,6 +2,7 @@
 
 import { ConversationItem } from "./conversation-item";
 import { ThemeToggle } from "./theme-toggle";
+import { UserMenu } from "./auth/user-menu";
 import type { Conversation } from "@/lib/types";
 
 interface ConversationListProps {
@@ -10,6 +11,7 @@ interface ConversationListProps {
   onSelect: (id: string) => void;
   onRename: (id: string, title: string) => void;
   onDelete: (id: string) => void;
+  sessionUser: { name: string; email: string };
 }
 
 export function ConversationList({
@@ -18,6 +20,7 @@ export function ConversationList({
   onSelect,
   onRename,
   onDelete,
+  sessionUser,
 }: ConversationListProps) {
   // <nav> rather than <div>: this is the app's primary navigation, and the
   // landmark lets screen-reader users jump straight to it.
@@ -29,7 +32,7 @@ export function ConversationList({
       </div>
 
       {conversations.length === 0 ? (
-        <p className="p-4 text-sm text-muted">No conversations yet.</p>
+        <p className="flex-1 p-4 text-sm text-muted">No conversations yet.</p>
       ) : (
         <ul className="flex-1 space-y-0.5 overflow-y-auto p-2">
           {conversations.map((conversation) => (
@@ -44,6 +47,8 @@ export function ConversationList({
           ))}
         </ul>
       )}
+
+      <UserMenu name={sessionUser.name} email={sessionUser.email} />
     </nav>
   );
 }

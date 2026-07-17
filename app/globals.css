@@ -28,6 +28,13 @@
   --bubble-other-foreground: #171717;
   --bubble-ai: #ecfdf5;
   --bubble-ai-foreground: #064e3b;
+
+  /* Errors. Tokenised rather than using Tailwind's `dark:` variant — that
+   * follows prefers-color-scheme and would ignore an explicit [data-theme]
+   * choice, leaving unreadable text for anyone who picks dark on a light OS. */
+  --danger: #dc2626;
+  --danger-bg: #fef2f2;
+  --danger-border: #fecaca;
 }
 
 /* OS preference — applies only when no explicit choice has been made. */
@@ -50,6 +57,10 @@
     --bubble-other-foreground: #ededed;
     --bubble-ai: #0f2e21;
     --bubble-ai-foreground: #a7f3d0;
+
+    --danger: #f87171;
+    --danger-bg: #2a1416;
+    --danger-border: #5b2224;
   }
 }
 
@@ -72,6 +83,10 @@
   --bubble-other-foreground: #ededed;
   --bubble-ai: #0f2e21;
   --bubble-ai-foreground: #a7f3d0;
+
+  --danger: #f87171;
+  --danger-bg: #2a1416;
+  --danger-border: #5b2224;
 }
 
 /* Tailwind v4 is configured here, not in a config file. Each --color-* entry
@@ -92,6 +107,10 @@
   --color-bubble-other-foreground: var(--bubble-other-foreground);
   --color-bubble-ai: var(--bubble-ai);
   --color-bubble-ai-foreground: var(--bubble-ai-foreground);
+
+  --color-danger: var(--danger);
+  --color-danger-bg: var(--danger-bg);
+  --color-danger-border: var(--danger-border);
 
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);

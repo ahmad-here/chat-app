@@ -29,32 +29,48 @@ The `--color-*` names in `@theme` are what generate utilities: `--color-backgrou
 produces `bg-background`, `text-background`, and so on. Add a token here and the
 utilities exist; there's no config file to touch.
 
-## 2. Two scaffold issues to fix before building on it
+## 2. Scaffold issues (fixed)
 
-Both are inherited from `create-next-app`, not mistakes anyone made here — but
-they'll cause confusion if left.
+Both were inherited from `create-next-app`. Recorded because the fixes are load-
+bearing and easy to undo by accident.
 
-**The Geist fonts are loaded but not applied.** [layout.tsx](../app/layout.tsx)
-loads `Geist` and `Geist_Mono` and exposes them as `--font-geist-sans` /
+**The Geist fonts were loaded but not applied.** [layout.tsx](../app/layout.tsx)
+loads `Geist` / `Geist_Mono` and exposes them as `--font-geist-sans` /
 `--font-geist-mono`, and `@theme` wires those to `--font-sans` / `--font-mono`.
-But `globals.css` then sets:
+But `globals.css` then hard-coded `font-family: Arial, Helvetica, sans-serif` on
+`body`, which won — the app rendered in Arial and the Geist download was dead
+weight. `body` now uses `var(--font-sans)`, so the tokens are the single source
+of truth. **Don't reintroduce a literal font stack on `body`.**
 
-```css
-body { font-family: Arial, Helvetica, sans-serif; }
-```
+**Dark mode is now a three-state toggle.** Decision: a user-facing toggle that
+defaults to the OS — a superset of OS-only, and the option that would have been
+expensive to retrofit. The mechanism:
 
-That hard-coded rule wins, so the app renders in Arial and the Geist download is
-wasted. Replace it with the token (`font-sans` on `<body>`, or
-`font-family: var(--font-sans)`) so the tokens are the single source of truth.
+| `<html>` state | Result |
+|---|---|
+| no `data-theme` | follows the OS via `prefers-color-scheme` |
+| `data-theme="light"` | forced light, overrides the OS |
+| `data-theme="dark"` | forced dark, overrides the OS |
 
-**Dark mode is currently OS-only.** The dark palette lives behind
-`@media (prefers-color-scheme: dark)`, so it follows the operating system and
-cannot be toggled.
-[requirements.md](./requirements.md) lists "dark mode" without specifying which —
-if a user-facing toggle is wanted, the media query is the wrong mechanism and
-must move to a class or `data-theme` selector (in Tailwind v4, via
-`@custom-variant`). **Decide this before writing themed components**, because
-retrofitting a toggle means touching every one of them.
+The OS rule is scoped `:root:not([data-theme="light"])` so an explicit light
+choice beats a dark OS setting. Note the palette is driven entirely by CSS
+variables swapped per theme — there is no Tailwind `dark:` variant in use and no
+`@custom-variant` needed. Components get theming for free by using the semantic
+utilities (§3).
+
+**The theme is applied by an inline script in `<head>`**
+([layout.tsx](../app/layout.tsx)), which runs during HTML parsing before first
+paint. This is the pattern Next 16 prescribes in
+`node_modules/next/dist/docs/01-app/02-guides/preventing-flash-before-hydration.md`.
+It matters: `useEffect` runs *after* paint, so the user would see the wrong theme
+flash first. `<html>` carries `suppressHydrationWarning` because the script
+mutates the DOM before React hydrates.
+
+[ThemeToggle](../app/components/theme-toggle.tsx) reads `localStorage` via
+`useSyncExternalStore` rather than `useState` + `useEffect` — the latter trips
+the `react-hooks/set-state-in-effect` lint rule and causes cascading renders.
+`getServerSnapshot` returns `"system"` so the server render matches the HTML the
+inline script then corrects.
 
 ## 3. Token discipline
 
@@ -64,10 +80,13 @@ retrofitting a toggle means touching every one of them.
 in dark mode — and it won't fail a build or a test, so nothing catches it but
 review.
 
-The current palette is two tokens deep — enough for the scaffold, not enough for
-a chat UI. Expect to add tokens for surface elevation (sidebar vs message pane),
-borders, muted/secondary text, and accent. Add them the same way: a `:root`
-value, a dark-mode override, and a `--color-*` entry in `@theme`.
+The palette now covers elevation (`background` < `surface` < `raised`), `border`,
+`muted`, `accent`, and the three message-bubble variants (own / other / AI). Add
+new tokens the same way: a `:root` value, matching overrides in **both** the
+`prefers-color-scheme` block and the `[data-theme="dark"]` block, and a
+`--color-*` entry in `@theme`. Missing one of the two dark blocks is the easy
+mistake — the token then works in OS dark mode but not when dark is chosen
+explicitly (or vice versa).
 
 ## 4. Layout
 

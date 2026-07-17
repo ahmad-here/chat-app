@@ -22,6 +22,7 @@ connected users, not just streaming a response back to the requester.
 | Area | Requirement |
 |---|---|
 | Auth | Email/password signup and login; authenticated session persists across reloads |
+| Auth | **Google sign-in** ("Continue with Google") — added 2026-07-17, previously out of scope |
 | Auth | Unauthenticated users are redirected away from chat routes |
 | Chat | Send and receive messages in real time, without polling or refresh |
 | Chat | A user can hold multiple conversations concurrently |
@@ -45,7 +46,13 @@ Recorded so they aren't assumed. Each is a plausible v2 candidate.
 - Push/email notifications
 - Search across messages
 - Group conversations beyond the basic participant model
-- OAuth/social login (email/password only in v1)
+- OAuth providers *other than* Google — Google moved in-scope 2026-07-17
+- **Email verification.** Signup does not prove the person owns the address they
+  register. This has a direct consequence: a Google sign-in is deliberately not
+  auto-linked to an existing password account with the same email, because
+  someone could pre-register an address they don't own. See
+  [architecture.md §4](./architecture.md#4-auth).
+- Password reset / forgot-password
 - Message reactions, threads, pinning
 
 ## 3. Functional requirements

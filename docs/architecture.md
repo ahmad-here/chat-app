@@ -115,8 +115,49 @@ configuration choice, and it has consequences:
 If server-side session revocation turns out to be a hard requirement, that
 changes the auth design and should be raised before implementation starts.
 
-Password hashing must use a slow, salted algorithm designed for passwords
-(bcrypt/argon2) — never a bare cryptographic hash.
+Password hashing uses bcrypt at 12 rounds (`app/api/signup/route.ts`) — slow by
+design, which is what makes a stolen hash expensive to brute-force.
+
+### Google sign-in and account linking
+
+Implemented 2026-07-17. `allowDangerousEmailAccountLinking` is **off**, and that
+is a deliberate security decision, not a default we forgot to change.
+
+With it on, signing in with Google would automatically attach to an existing
+password account that has the same email. That is unsafe *here* specifically
+because **signup does not verify email ownership**: anyone can register
+`victim@gmail.com` with a password of their choosing. If Google then auto-linked,
+the moment the real owner signed in with Google, the attacker's password would
+unlock their account.
+
+The cost is a real UX wrinkle: a user who signed up with a password and later
+clicks "Continue with Google" gets Auth.js's `OAuthAccountNotLinked` error. The
+login page translates that into "This email is already registered with a
+password. Sign in with your password below" rather than showing the raw code.
+
+**Revisit once email verification exists** — that removes the precondition that
+makes linking unsafe.
+
+### Runtime split
+
+`auth.config.ts` is edge-safe (Google only, no adapter, no bcrypt) and is what
+`proxy.ts` imports. `auth.ts` adds the MongoDB adapter and the Credentials
+provider, and is Node-only. Importing `auth.ts` into the proxy breaks the build
+with an opaque module-not-found error for `dns`/`net`/`tls`.
+
+### Route protection
+
+Two layers, per Next's auth guide:
+
+- **`proxy.ts`** — optimistic redirects only. Runs on every request including
+  prefetches, so it only decodes the session cookie and never queries MongoDB.
+  Note it is `proxy.ts`, not `middleware.ts`: Next 16 renamed the convention.
+  It deliberately **skips `/api`** — redirecting a fetch to an HTML login page is
+  nonsense, and an earlier version that only skipped `/api/auth` broke signup
+  entirely (you needed a session to create an account).
+- **`lib/dal.ts`** — the real boundary. `verifySession()` is called next to the
+  data. Not in a layout: partial rendering means layouts don't re-render on
+  client-side navigation, so a check there silently stops running.
 
 ## 5. Data layer
 

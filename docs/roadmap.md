@@ -21,8 +21,10 @@ without them.
 - [ ] Conversation delete semantics — for-everyone or for-me
       ([requirements.md §6](./requirements.md#6-open-questions))
 - [ ] How conversations get created; 1:1 or group
-- [ ] Dark mode: OS-following or user toggle
-      ([ui-guidelines.md §2](./ui-guidelines.md#2-two-scaffold-issues-to-fix-before-building-on-it))
+- [x] **Dark mode** — decided 2026-07-17: a **three-state toggle** (light / system /
+      dark) defaulting to the OS. A superset of OS-only, so it satisfies the
+      requirement either way, and the expensive-to-retrofit option.
+      ([ui-guidelines.md §2](./ui-guidelines.md#2-scaffold-issues-fixed))
 - [ ] ODM vs raw MongoDB driver
 - [ ] `server.js` vs `server.ts` — the entrypoint sits outside the Next compiler,
       so TypeScript there needs its own compile step or a loader
@@ -49,16 +51,23 @@ them keeps one hard thing per step.
 - [ ] **Update [.claude/skills/dev-server](../.claude/skills/dev-server/SKILL.md)
       in the same change** — it documents `npm run dev` → `next dev`, which becomes
       wrong the moment `server.js` lands. A skill that lies is worse than no skill.
-- [ ] Fix the two scaffold issues: apply the Geist font tokens, and settle the
-      dark-mode mechanism ([ui-guidelines.md §2](./ui-guidelines.md#2-two-scaffold-issues-to-fix-before-building-on-it)).
-      Both are cheap now and expensive after components exist.
-- [ ] Expand the palette beyond `background`/`foreground` — surfaces, borders,
-      muted text, accent.
+- [x] **Fixed the two scaffold issues** — `body` now uses the Geist font token
+      instead of hard-coded Arial, and dark mode moved from an OS-only media query
+      to the three-state `data-theme` mechanism
+      ([ui-guidelines.md §2](./ui-guidelines.md#2-scaffold-issues-fixed)).
+- [x] **Expanded the palette** — elevation (`background`/`surface`/`raised`),
+      `border`, `muted`, `accent`, and the three bubble variants.
+- [x] **App shell** — responsive two-pane layout with placeholder content:
+      conversation list (rename/delete), message list, composer, theme toggle.
+      Placeholder data lives in `lib/placeholder-data.ts`; types in `lib/types.ts`
+      mirror [requirements.md §4](./requirements.md#4-data-model).
+- [ ] Markdown rendering + syntax highlighting. **Not started** — needs a
+      sanitizing renderer; message bubbles currently render plain text
+      ([ui-guidelines.md §7](./ui-guidelines.md#7-markdown-and-code-blocks)).
 - [ ] MongoDB connection with the dev-mode `globalThis` cache
       ([architecture.md §5](./architecture.md#5-data-layer)).
 - [ ] Create the indexes — including the **unique** index on `users.email`, which
       is what actually enforces duplicate rejection.
-- [ ] App shell: responsive two-pane layout with placeholder content.
 
 **Done when:** the app builds and serves under `node server.js` in both dev and
 production mode, with hot reload still working in dev.
@@ -70,15 +79,30 @@ matters to it: Phase 4 has to authenticate the Socket.IO handshake against
 whatever this phase builds
 ([architecture.md §4](./architecture.md#4-auth)).
 
-- [ ] Auth.js v5 + MongoDB adapter, Credentials provider, **JWT sessions** — note
-      the constraint in [architecture.md §4](./architecture.md#4-auth): Credentials
-      does not support database sessions.
-- [ ] Signup: email, password, display name. Password hashed with bcrypt/argon2.
-- [ ] Login, logout, session persistence across reload.
-- [ ] Route protection with redirect for unauthenticated users.
+- [x] Auth.js v5 + MongoDB adapter, Credentials provider, **JWT sessions** — the
+      constraint in [architecture.md §4](./architecture.md#4-auth) holds:
+      Credentials does not support database sessions.
+- [x] Signup: email, password, display name. bcrypt at 12 rounds. Duplicates are
+      rejected by the **unique index**, not an application-level check, because
+      two concurrent signups can both read "email free" before either writes.
+- [x] Login, logout, session persistence across reload.
+- [x] Route protection — `proxy.ts` (optimistic) + `lib/dal.ts` (real check).
+- [x] **Google sign-in.** Account linking deliberately off — see
+      [architecture.md §4](./architecture.md#4-auth).
+- [ ] **Blocked on config:** Google needs `AUTH_GOOGLE_ID` / `AUTH_GOOGLE_SECRET`
+      in `.env.local`. Unverified until those exist — the button renders and the
+      provider registers, but no real Google round-trip has been performed.
+- [ ] Password reset, email verification — deferred
+      ([requirements.md §2](./requirements.md#2-scope)). Email verification is a
+      precondition for safely auto-linking Google to password accounts.
 
 **Done when:** a user can sign up, log out, log back in, and reach a protected
 page — verified in the browser, not just by passing types.
+
+**Status:** the credentials half is verified end-to-end against a real MongoDB by
+`scripts/verify-auth.mjs` (15 checks: hashing, duplicate rejection, session
+issuance, redirect behaviour). Run it with `npm run verify:auth`. The Google half
+is **not** verified — it needs OAuth credentials.
 
 ## Phase 3 — Conversations and messages (no real-time yet)
 

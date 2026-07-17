@@ -10,7 +10,15 @@ interface ChatShellProps {
   initialConversations: Conversation[];
   initialMessages: Message[];
   users: User[];
+  /** Identifies "own" messages for bubble alignment.
+   *
+   * Still the placeholder id, NOT the signed-in user's id — the seeded messages
+   * are authored by placeholder users, so using the real id would leave every
+   * bubble looking like someone else's. These converge in Phase 3, when
+   * messages come from MongoDB and are authored by real users. */
   currentUserId: string;
+  /** The actually-signed-in user, from the session. */
+  sessionUser: { name: string; email: string };
 }
 
 export function ChatShell({
@@ -18,6 +26,7 @@ export function ChatShell({
   initialMessages,
   users,
   currentUserId,
+  sessionUser,
 }: ChatShellProps) {
   // Local state stands in for the server until Phase 3 — nothing here persists.
   // When real data lands, most of this moves server-side and only the live
@@ -87,6 +96,7 @@ export function ChatShell({
           onSelect={handleSelect}
           onRename={handleRename}
           onDelete={handleDelete}
+          sessionUser={sessionUser}
         />
       </aside>
 
@@ -116,6 +126,7 @@ export function ChatShell({
             onSelect={handleSelect}
             onRename={handleRename}
             onDelete={handleDelete}
+            sessionUser={sessionUser}
           />
         </div>
       </div>
