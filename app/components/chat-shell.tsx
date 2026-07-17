@@ -1,103 +1,87 @@
 "use client";
 
+import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { ConversationList } from "./conversation-list";
+import { FriendsPanel } from "./friends-panel";
 import { MessageList } from "./message-list";
 import { Composer } from "./composer";
+import { useChatSocket } from "./use-chat-socket";
 import type { Conversation, Message, User } from "@/lib/types";
 
 interface ChatShellProps {
-  initialConversations: Conversation[];
+  conversations: Conversation[];
+  /** History for `activeChatId`, rendered on the server. */
   initialMessages: Message[];
-  users: User[];
-  /** Identifies "own" messages for bubble alignment.
-   *
-   * Still the placeholder id, NOT the signed-in user's id — the seeded messages
-   * are authored by placeholder users, so using the real id would leave every
-   * bubble looking like someone else's. These converge in Phase 3, when
-   * messages come from MongoDB and are authored by real users. */
+  /** Participants of the active chat, for author names. */
+  participants: User[];
+  activeChatId: string | null;
   currentUserId: string;
-  /** The actually-signed-in user, from the session. */
   sessionUser: { name: string; email: string };
 }
 
 export function ChatShell({
-  initialConversations,
+  conversations,
   initialMessages,
-  users,
+  participants,
+  activeChatId,
   currentUserId,
   sessionUser,
 }: ChatShellProps) {
-  // Local state stands in for the server until Phase 3 — nothing here persists.
-  // When real data lands, most of this moves server-side and only the live
-  // pieces stay client (architecture.md §7).
-  const [conversations, setConversations] = useState(initialConversations);
-  const [messages, setMessages] = useState(initialMessages);
-  const [activeId, setActiveId] = useState<string | null>(
-    initialConversations[0]?.id ?? null,
-  );
+  const router = useRouter();
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
+  const [isFriendsOpen, setIsFriendsOpen] = useState(false);
 
-  const active = conversations.find((c) => c.id === activeId) ?? null;
-  const visibleMessages = active
-    ? messages.filter((m) => m.chatId === active.id)
-    : [];
+  const { messages, send, isConnected } = useChatSocket({
+    chatId: activeChatId,
+    initialMessages,
+  });
 
+  const active = conversations.find((c) => c.id === activeChatId) ?? null;
+
+  /** Conversation selection lives in the URL, not component state.
+   *
+   * That makes a conversation linkable and survivable across reload, and lets
+   * the server render its history — rather than the client fetching it after
+   * mount and flashing an empty thread. */
   function handleSelect(id: string): void {
-    setActiveId(id);
-    setIsDrawerOpen(false); // On mobile the drawer covers the conversation.
+    setIsDrawerOpen(false);
+    router.push(`/?chat=${id}`);
   }
 
-  function handleRename(id: string, title: string): void {
-    setConversations((prev) =>
-      prev.map((c) => (c.id === id ? { ...c, title } : c)),
-    );
+  async function handleDelete(id: string): Promise<void> {
+    // "Delete" hides the conversation for this user only; the other participant
+    // keeps it and the full history (docs/requirements.md §3.2). No confirm
+    // step: nothing is destroyed, and a new message brings it back.
+    const res = await fetch(`/api/chats/${id}`, { method: "DELETE" });
+    if (!res.ok) return;
+    // Re-render from the server rather than mutating local state, so the list
+    // and the active selection stay consistent with what's actually stored.
+    if (id === activeChatId) router.push("/");
+    else router.refresh();
   }
 
-  function handleDelete(id: string): void {
-    // Deletes locally with no confirmation because the semantics are still
-    // undecided — for-everyone vs for-me changes both the schema and whether a
-    // confirm step is warranted (requirements.md §6). Wiring a real destructive
-    // action before that is settled would bake in the wrong answer.
-    setConversations((prev) => prev.filter((c) => c.id !== id));
-    setMessages((prev) => prev.filter((m) => m.chatId !== id));
-    if (activeId === id) {
-      setActiveId((prev) => {
-        const remaining = conversations.filter((c) => c.id !== id);
-        return remaining[0]?.id ?? (prev === id ? null : prev);
-      });
-    }
+  function handleChatStarted(chatId: string): void {
+    router.push(`/?chat=${chatId}`);
+    router.refresh();
   }
 
-  function handleSend(content: string): void {
-    if (!active) return;
-    setMessages((prev) => [
-      ...prev,
-      {
-        // Date.now() is fine here: this runs in a browser event handler, never
-        // during SSR, so there's no server/client value to disagree about.
-        id: `m_local_${Date.now()}`,
-        chatId: active.id,
-        authorId: currentUserId,
-        role: "user",
-        content,
-        createdAt: new Date().toISOString(),
-      },
-    ]);
-  }
+  const sidebar = (
+    <ConversationList
+      conversations={conversations}
+      activeId={activeChatId}
+      onSelect={handleSelect}
+      onDelete={handleDelete}
+      onOpenFriends={() => setIsFriendsOpen(true)}
+      sessionUser={sessionUser}
+    />
+  );
 
   return (
     <div className="flex h-dvh overflow-hidden">
       {/* Desktop sidebar. Hidden below md, where the drawer takes over. */}
       <aside className="hidden w-72 shrink-0 border-r border-border md:block">
-        <ConversationList
-          conversations={conversations}
-          activeId={activeId}
-          onSelect={handleSelect}
-          onRename={handleRename}
-          onDelete={handleDelete}
-          sessionUser={sessionUser}
-        />
+        {sidebar}
       </aside>
 
       {/* Mobile drawer. Rendered but translated off-screen rather than
@@ -120,16 +104,26 @@ export function ChatShell({
             isDrawerOpen ? "translate-x-0" : "-translate-x-full"
           }`}
         >
-          <ConversationList
-            conversations={conversations}
-            activeId={activeId}
-            onSelect={handleSelect}
-            onRename={handleRename}
-            onDelete={handleDelete}
-            sessionUser={sessionUser}
-          />
+          {sidebar}
         </div>
       </div>
+
+      {isFriendsOpen && (
+        <div className="fixed inset-0 z-30 flex justify-end bg-black/40">
+          <button
+            type="button"
+            onClick={() => setIsFriendsOpen(false)}
+            aria-label="Close friends"
+            className="flex-1"
+          />
+          <div className="w-full max-w-sm border-l border-border">
+            <FriendsPanel
+              onClose={() => setIsFriendsOpen(false)}
+              onChatStarted={handleChatStarted}
+            />
+          </div>
+        </div>
+      )}
 
       <main className="flex min-w-0 flex-1 flex-col">
         <header className="flex items-center gap-2 border-b border-border bg-raised p-3">
@@ -154,31 +148,40 @@ export function ChatShell({
             </svg>
           </button>
 
-          <div className="min-w-0">
+          <div className="min-w-0 flex-1">
             <h1 className="truncate text-sm font-semibold">
               {active ? active.title : "No conversation"}
             </h1>
-            {active && (
-              <p className="truncate text-xs text-muted">
-                {active.participantIds.length} participants
-              </p>
-            )}
           </div>
+
+          {active && !isConnected && (
+            // Surfaced rather than hidden: while disconnected, messages from the
+            // other person are not arriving. Silently showing a stale thread as
+            // if it were live is worse than saying so.
+            <span
+              role="status"
+              className="shrink-0 rounded-full bg-surface px-2 py-0.5 text-[10px] text-muted"
+            >
+              Reconnecting…
+            </span>
+          )}
         </header>
 
         {active ? (
           <>
             <MessageList
-              messages={visibleMessages}
-              users={users}
+              messages={messages}
+              users={participants}
               currentUserId={currentUserId}
             />
-            <Composer onSend={handleSend} conversationTitle={active.title} />
+            <Composer onSend={send} conversationTitle={active.title} />
           </>
         ) : (
           <div className="flex flex-1 items-center justify-center p-8">
-            <p className="text-sm text-muted">
-              Select a conversation to start chatting.
+            <p className="max-w-xs text-center text-sm text-muted">
+              {conversations.length === 0
+                ? "Open Friends, share your code, and connect with someone to start chatting."
+                : "Select a conversation to start chatting."}
             </p>
           </div>
         )}

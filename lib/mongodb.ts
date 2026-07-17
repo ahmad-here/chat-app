@@ -20,8 +20,6 @@ declare global {
   var _mongoClientPromise: Promise<MongoClient> | undefined;
 }
 
-let cachedPromise: Promise<MongoClient> | undefined;
-
 /** Connects on first call. Throws only if actually used without a URI. */
 export function getClientPromise(): Promise<MongoClient> {
   const uri = process.env.MONGODB_URI;
@@ -31,13 +29,17 @@ export function getClientPromise(): Promise<MongoClient> {
     );
   }
 
-  if (process.env.NODE_ENV === "development") {
-    global._mongoClientPromise ??= new MongoClient(uri).connect();
-    return global._mongoClientPromise;
-  }
-
-  cachedPromise ??= new MongoClient(uri).connect();
-  return cachedPromise;
+  // Cached on globalThis in ALL environments, not just development.
+  //
+  // Dev needs it because hot reload re-evaluates this module on every edit, and
+  // a fresh pool per reload exhausts MongoDB's connection limit.
+  //
+  // Production needs it too, now that server.mts exists: the custom server runs
+  // outside Next's bundle, so Node's module graph and Turbopack's each hold
+  // their own instance of this file. Two instances means two pools in one
+  // process unless they meet on globalThis, which is shared by both.
+  global._mongoClientPromise ??= new MongoClient(uri).connect();
+  return global._mongoClientPromise;
 }
 
 export async function getDb(): Promise<Db> {

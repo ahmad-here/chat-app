@@ -43,31 +43,34 @@ means everything built in Phases 1–3 runs under an entrypoint we're going to t
 away — and the swap lands at the same moment as the trickiest feature. Separating
 them keeps one hard thing per step.
 
-- [ ] **`server.js` hosting Next.js, no Socket.IO yet.** Creates the Node HTTP
-      server, delegates to Next's `getRequestHandler()`, passes itself via the
-      `httpServer` option. Update `dev` → `node server.js` and `start` →
-      `NODE_ENV=production node server.js`. Resolve the `.js` vs `.ts` question
-      first — the file is outside the Next compiler.
-- [ ] **Update [.claude/skills/dev-server](../.claude/skills/dev-server/SKILL.md)
-      in the same change** — it documents `npm run dev` → `next dev`, which becomes
-      wrong the moment `server.js` lands. A skill that lies is worse than no skill.
+- [x] **[server.mts](../server.mts) hosting Next.js.** Landed with Socket.IO
+      rather than before it — the user asked for the backend in one go. `dev` →
+      `node server.mts`, `start` → `cross-env NODE_ENV=production node server.mts`
+      (cross-env because `NODE_ENV=x cmd` is bash syntax that fails on Windows).
+      The `.js` vs `.ts` question resolved to **`.mts`**: Node 24 strips types
+      natively so there's no build step, and `.mts` is unconditionally ESM where a
+      `.ts` would have loaded as CommonJS and failed on its own imports.
+- [x] **Updated [.claude/skills/dev-server](../.claude/skills/dev-server/SKILL.md)**
+      in the same change — it documented `npm run dev` → `next dev`, which became
+      wrong the moment `server.mts` landed.
 - [x] **Fixed the two scaffold issues** — `body` now uses the Geist font token
       instead of hard-coded Arial, and dark mode moved from an OS-only media query
       to the three-state `data-theme` mechanism
       ([ui-guidelines.md §2](./ui-guidelines.md#2-scaffold-issues-fixed)).
 - [x] **Expanded the palette** — elevation (`background`/`surface`/`raised`),
       `border`, `muted`, `accent`, and the three bubble variants.
-- [x] **App shell** — responsive two-pane layout with placeholder content:
-      conversation list (rename/delete), message list, composer, theme toggle.
-      Placeholder data lives in `lib/placeholder-data.ts`; types in `lib/types.ts`
-      mirror [requirements.md §4](./requirements.md#4-data-model).
+- [x] **App shell** — responsive two-pane layout: conversation list, message list,
+      composer, theme toggle, friends panel. Now driven by **real data**;
+      `lib/placeholder-data.ts` has been deleted.
 - [ ] Markdown rendering + syntax highlighting. **Not started** — needs a
       sanitizing renderer; message bubbles currently render plain text
       ([ui-guidelines.md §7](./ui-guidelines.md#7-markdown-and-code-blocks)).
-- [ ] MongoDB connection with the dev-mode `globalThis` cache
-      ([architecture.md §5](./architecture.md#5-data-layer)).
-- [ ] Create the indexes — including the **unique** index on `users.email`, which
-      is what actually enforces duplicate rejection.
+- [x] MongoDB connection with an **unconditional** `globalThis` cache — not
+      dev-only: the custom server runs outside Next's bundle, so without it the
+      process holds two pools ([architecture.md §5](./architecture.md#5-data-layer)).
+- [x] Indexes created at boot from [instrumentation.ts](../instrumentation.ts) —
+      including the four **unique** indexes that are the only real defence against
+      duplicate accounts, codes, friendships, and conversations.
 
 **Done when:** the app builds and serves under `node server.js` in both dev and
 production mode, with hot reload still working in dev.
@@ -104,25 +107,33 @@ page — verified in the browser, not just by passing types.
 issuance, redirect behaviour). Run it with `npm run verify:auth`. The Google half
 is **not** verified — it needs OAuth credentials.
 
-## Phase 3 — Conversations and messages (no real-time yet)
+## Phase 3 — Friends, conversations and messages
 
-Deliberately built without the live connection. Request/response is easier to
-debug, and it proves the data model and authorization before a transport is
-layered on. If something's wrong with the schema, you find out here.
+Built together with Phase 4 rather than before it, at the user's direction. The
+original plan sequenced them apart so the data model could be proven under plain
+request/response first; in the event the schema held, and `npm run verify:chat`
+covers both layers.
 
-- [ ] Create a conversation; list the current user's conversations.
-- [ ] Open a conversation and load history.
-- [ ] Send a message (persisted; visible on refresh).
-- [ ] Rename and delete, per the Phase 0 delete decision.
-- [ ] **Server-side authorization on every read and write** — a user must not
-      reach a conversation they don't participate in. Test this explicitly with a
-      second account rather than assuming it.
+- [x] **Friends by connect code** — permanent per-user code, instant connect.
+      New concept, absent from the original data model
+      ([requirements.md §3.2](./requirements.md)).
+- [x] Start a 1:1 conversation with a friend; list the user's conversations.
+- [x] Open a conversation and load history **server-side** (from `?chat=<id>`, so
+      it's linkable and survives reload rather than flashing empty).
+- [x] Send a message (persisted; visible on refresh).
+- [x] Delete = hide-for-me; a new message un-hides it.
+- [x] ~~Rename~~ — **removed.** 1:1 titles are derived per viewer; there is no
+      stored title to rename.
+- [x] **Server-side authorization on every read and write**, verified with a
+      third account: a non-friend can't start a chat, a non-participant gets 404
+      on history (not an empty thread), and is refused the socket room.
 - [ ] Markdown rendering, **sanitized**
       ([ui-guidelines.md §7](./ui-guidelines.md#7-markdown-and-code-blocks)), plus
-      syntax highlighting.
+      syntax highlighting. **Still open** — bubbles render plain text; shipping an
+      unsanitized renderer would be stored XSS for every participant.
 
 **Done when:** two accounts can each hold conversations, neither can see the
-other's, and a refresh shows the full history.
+other's, and a refresh shows the full history. **Met** — `npm run verify:chat`.
 
 ## Phase 4 — Real-time (Socket.IO)
 
@@ -130,27 +141,30 @@ Everything before this works without a live connection; nothing from here on doe
 Builds on the Phase 1 server shell — this phase attaches Socket.IO to a `server.js`
 that already exists and already serves the app.
 
-- [ ] Attach the Socket.IO server to the existing HTTP server in `server.js`.
-- [ ] **Authenticate the socket on connect** against the Auth.js session. An
-      unauthenticated socket gets nothing. Note the JWT-session shape from
-      [architecture.md §4](./architecture.md#4-auth) — the socket handshake has to
-      read the session cookie, which is not the same code path as a route handler.
-- [ ] **Authorize room joins server-side.** One room per conversation. Check
-      membership against `chats.participantIds` before joining — never trust a room
-      name the client asks for
-      ([architecture.md §3](./architecture.md#3-the-central-problem-real-time-between-users)).
-- [ ] Emit to the conversation room on write; subscribe on the client.
-- [ ] Handle reconnection and the gap it leaves: a dropped connection means missed
-      messages, so reconnect has to re-fetch history rather than just rejoin the
-      room. Socket.IO reconnects automatically — which makes this easy to miss,
-      because the connection looks healthy while the client silently sits on a
-      hole in its history.
-- [ ] Avoid the double-render — the sender shouldn't see their own message twice
-      when the echo arrives.
+- [x] Attach the Socket.IO server to the HTTP server in `server.mts` — **after**
+      `app.prepare()`, or engine.io swallows Next's HMR upgrade listener and hot
+      reload silently dies ([architecture.md §3](./architecture.md#3-the-central-problem-real-time-between-users)).
+- [x] **Authenticate the socket on connect** against the Auth.js session. The JWT
+      is *encrypted*, so only Auth.js's `getToken` can read it; `secureCookie`
+      must come from AUTH_URL's protocol, not `NODE_ENV`, or every socket fails
+      to authenticate silently.
+- [x] **Authorize room joins server-side** against `chats.participantIds` — the
+      client's chatId is a request, never a grant.
+- [x] Emit to the conversation room on write; subscribe on the client.
+- [x] Handle reconnection and the gap it leaves — the client refetches history on
+      every `connect`, not just the first.
+- [x] Avoid the double-render — solved by construction: the author renders from
+      the server echo rather than inserting optimistically, so there is only one
+      code path that puts a message on screen.
 
 **Done when:** two browsers, two accounts, one conversation — a message sent in one
 appears in the other with no refresh; and after killing the network on one client
 and restoring it, that client shows the messages it missed while offline.
+
+**Status:** the delivery half is **verified** by `npm run verify:chat` (28 checks,
+two real sockets — Alice sends, Bob receives, a third user gets nothing). The
+**offline-gap half is not**: the refetch-on-reconnect path is written and
+reasoned about but no test kills the network and restores it. Worth adding.
 
 **Deferred, deliberately:** multi-instance scaling needs a Socket.IO adapter to
 broker events between processes
@@ -187,9 +201,27 @@ reactions, threads.
 Per [CLAUDE.md](../CLAUDE.md), the project stays buildable throughout. Automated
 checks already run:
 
-- ESLint on every file edit, and `tsc --noEmit` at the end of each turn — see
-  [.claude/settings.json](../.claude/settings.json).
-- **Neither proves a feature works.** Every "done when" above is a behavior
-  observed in a running app. Lint and typecheck are a floor, not the bar — the
-  [dev-server skill](../.claude/skills/dev-server/SKILL.md) covers driving the
-  app.
+Automated, via [.claude/settings.json](../.claude/settings.json):
+
+| When | Hook | What it does |
+|---|---|---|
+| Before `Write` | [check-duplicate-component.mjs](../.claude/hooks/check-duplicate-component.mjs) | **Blocks** a write that would export a component name another file already exports, enforcing CLAUDE.md's "no duplicated code" at the moment it's cheap to fix |
+| After `Write`/`Edit` | [lint-file.mjs](../.claude/hooks/lint-file.mjs) | ESLint `--fix` on the touched file |
+| Turn end | [typecheck.mjs](../.claude/hooks/typecheck.mjs) | `tsc --noEmit` across the project |
+
+The duplicate check deliberately ignores `export default` and Next.js convention
+filenames (`page`/`layout`/`route`/…) — those repeat by design, one per route, so
+matching them would flag `/login/page.tsx` against `/signup/page.tsx` forever. It
+matches only named PascalCase value exports, where a collision is a real
+duplicate. Types are exempt: a shared name there is often deliberate.
+
+On demand:
+
+```bash
+npm run verify:auth   # 15 checks — signup, bcrypt, duplicates, sessions, redirects
+npm run verify:chat   # 28 checks — codes, friendships, rooms, real socket delivery
+```
+
+**None of this proves a feature works.** Every "done when" above is a behaviour
+observed in a running app. Lint and typecheck are a floor, not the bar — the
+[dev-server skill](../.claude/skills/dev-server/SKILL.md) covers driving the app.

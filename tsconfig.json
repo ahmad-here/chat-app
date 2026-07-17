@@ -9,6 +9,11 @@
     "esModuleInterop": true,
     "module": "esnext",
     "moduleResolution": "bundler",
+    // server.mts is run directly by Node (type-stripped), not bundled by Next.
+    // Node ESM requires explicit file extensions on relative imports, so the
+    // modules it shares with the app must import each other as "./x.ts".
+    // Legal only because noEmit is set.
+    "allowImportingTsExtensions": true,
     "resolveJsonModule": true,
     "isolatedModules": true,
     "jsx": "react-jsx",

@@ -9,8 +9,8 @@ interface ConversationListProps {
   conversations: Conversation[];
   activeId: string | null;
   onSelect: (id: string) => void;
-  onRename: (id: string, title: string) => void;
   onDelete: (id: string) => void;
+  onOpenFriends: () => void;
   sessionUser: { name: string; email: string };
 }
 
@@ -18,8 +18,8 @@ export function ConversationList({
   conversations,
   activeId,
   onSelect,
-  onRename,
   onDelete,
+  onOpenFriends,
   sessionUser,
 }: ConversationListProps) {
   // <nav> rather than <div>: this is the app's primary navigation, and the
@@ -31,8 +31,21 @@ export function ConversationList({
         <ThemeToggle />
       </div>
 
+      <div className="border-b border-border p-2">
+        <button
+          type="button"
+          onClick={onOpenFriends}
+          className="w-full rounded-md bg-accent px-2 py-1.5 text-xs font-medium text-accent-foreground hover:opacity-90 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+        >
+          Friends &amp; connect code
+        </button>
+      </div>
+
       {conversations.length === 0 ? (
-        <p className="flex-1 p-4 text-sm text-muted">No conversations yet.</p>
+        <p className="flex-1 p-4 text-sm text-muted">
+          No conversations yet. Connect with someone using a code, then start a
+          chat.
+        </p>
       ) : (
         <ul className="flex-1 space-y-0.5 overflow-y-auto p-2">
           {conversations.map((conversation) => (
@@ -41,7 +54,6 @@ export function ConversationList({
               conversation={conversation}
               isActive={conversation.id === activeId}
               onSelect={onSelect}
-              onRename={onRename}
               onDelete={onDelete}
             />
           ))}

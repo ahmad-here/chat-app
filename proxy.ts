@@ -52,8 +52,16 @@ export const config = {
   // an earlier version excluded only `api/auth`, which meant POST /api/signup
   // was redirected to /login: you needed an account to create an account.
   //
-  // Route handlers are therefore responsible for their own auth (lib/dal.ts),
-  // which is where the real check belongs anyway — the proxy is optimistic UX,
-  // not a security boundary. /api/signup and /api/auth are intentionally public.
-  matcher: ["/((?!api|_next/static|_next/image|favicon.ico).*)"],
+  // Route handlers are therefore responsible for their own auth (lib/api-auth.ts
+  // / lib/dal.ts), which is where the real check belongs anyway — the proxy is
+  // optimistic UX, not a security boundary. /api/signup and /api/auth are
+  // intentionally public.
+  //
+  // /socket.io is excluded too. engine.io intercepts requests on its path before
+  // Next's handler ever runs, so in practice the proxy never sees them — but the
+  // polling handshake is plain HTTP, and if one ever did reach the proxy it
+  // would be redirected to an HTML login page and the transport would fail for
+  // reasons that look nothing like auth. The socket authenticates itself in
+  // server.mts.
+  matcher: ["/((?!api|socket.io|_next/static|_next/image|favicon.ico).*)"],
 };

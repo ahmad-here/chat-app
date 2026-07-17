@@ -24,10 +24,13 @@ connected users, not just streaming a response back to the requester.
 | Auth | Email/password signup and login; authenticated session persists across reloads |
 | Auth | **Google sign-in** ("Continue with Google") — added 2026-07-17, previously out of scope |
 | Auth | Unauthenticated users are redirected away from chat routes |
+| Friends | Every user has a permanent **connect code**, shown in their profile |
+| Friends | Entering someone's code connects both users instantly — the code IS the consent |
+| Friends | A user can see who they're connected to |
+| Chat | Start a 1:1 conversation with a friend (explicit action, not automatic) |
 | Chat | Send and receive messages in real time, without polling or refresh |
 | Chat | A user can hold multiple conversations concurrently |
-| Chat | Rename a conversation |
-| Chat | Delete a conversation |
+| Chat | Remove a conversation from **your own** list, leaving the other person's intact |
 | Chat | Message history loads when a conversation is opened |
 | AI | A user can invoke the AI assistant inside a conversation; its reply is visible to conversation participants |
 | UI | Dark mode |
@@ -67,16 +70,38 @@ Recorded so they aren't assumed. Each is a plausible v2 candidate.
 - **Route protection** — chat routes require a session. Unauthenticated access
   redirects to login.
 
-### 3.2 Conversations
+### 3.2 Friends and conversations
+
+**Connecting.** Every user has a permanent connect code. Sharing it and having
+someone enter it makes both users friends immediately — **the code is the
+consent**, so there is no request/accept step. Consequences that follow from
+"permanent":
+
+- The code cannot be revoked without changing it (not built; a `regenerate`
+  action is the obvious extension).
+- It is a standing **enumeration** target. Length defends against guessing one
+  specific person's code; only rate limiting defends against scanning for *any*
+  valid code. `/api/friends/connect` is limited to 10 attempts/minute per user.
+- Entering your own code is rejected. Re-entering a friend's code is a no-op, not
+  an error — the end state is what the user wanted either way.
+
+**Conversations.** Connecting does not create a conversation; starting one is an
+explicit action ("Start chat"). Exactly one 1:1 conversation exists per pair,
+even if both users start one simultaneously.
 
 - A conversation has participants and an ordered message history.
 - A user sees only conversations they participate in. This is an **authorization
-  requirement, not a UI filter** — the server must enforce it on every read and
-  write, including the real-time channel.
-- **Rename** — any participant may rename; the new title is visible to all
-  participants.
-- **Delete** — semantics must be decided (see Open questions): does delete remove
-  the conversation for everyone, or only for the acting user?
+  requirement, not a UI filter** — the server enforces it on every read and
+  write, *including the real-time channel*: a socket may only join a room after
+  the server checks membership in the database.
+- **No rename, and no stored title.** A 1:1 title is derived per viewer — Alice
+  sees "Bob", Bob sees "Alice". A single shared, mutable title is meaningless
+  here (your friend renaming your chat is strange), so the field and the feature
+  are both gone. Revisit when group chats arrive.
+- **Delete means "hide for me".** It removes the conversation from the acting
+  user's list only; the other participant keeps it and the full history. A hard
+  shared delete would let one person destroy the other's record with no recourse.
+  A new message un-hides it.
 
 ### 3.3 Messages
 
@@ -110,16 +135,30 @@ imply. Field-level types are settled in [architecture.md](./architecture.md).
 | `email` | Unique, indexed |
 | `name` | Display name |
 | `passwordHash` | Never plaintext; never returned to the client |
+| `connectCode` | Permanent share code. **Unique + sparse index.** Assigned **lazily on first read**, not at signup — Google users are created by the Auth.js adapter and never touch `/api/signup`, and users predating the feature have none. Lazy assignment covers every path with no migration |
 | `image` | Optional avatar |
+| `createdAt` | |
+
+### friendships
+Symmetric, stored **once** per pair with the ids canonically ordered
+(`userA < userB`), so (A,B) and (B,A) produce the same key.
+
+| Field | Notes |
+|---|---|
+| `_id` | Primary key |
+| `userA` / `userB` | Canonically ordered. **Unique compound index** — this is what makes a duplicate friendship impossible, including when both users enter each other's code at the same instant |
 | `createdAt` | |
 
 ### chats
 | Field | Notes |
 |---|---|
 | `_id` | Primary key |
-| `title` | Mutable (rename) |
 | `participantIds` | Array of user ids; indexed — every access check reads this |
+| `pairKey` | Canonical `"<idA>_<idB>"` for 1:1 chats. **Unique + sparse index** — guarantees one conversation per pair under concurrent "Start chat". Absent for future group chats, which sparse exempts |
+| `hiddenFor` | Users who removed this chat from their list. Delete is per-user; a new message clears it |
 | `createdAt` / `updatedAt` | `updatedAt` drives conversation-list ordering |
+
+No `title`: 1:1 titles are derived per viewer (§3.2).
 
 ### messages
 | Field | Notes |
@@ -143,17 +182,18 @@ imply. Field-level types are settled in [architecture.md](./architecture.md).
 
 ## 6. Open questions
 
-These block implementation of the features they touch. None are answerable from
-the repo — they need a product decision.
+### Answered 2026-07-17
 
-1. **Conversation delete semantics.** Delete for everyone, or leave/hide for the
-   acting user only? Affects the `chats` schema (a soft-delete or per-user hidden
-   flag vs a hard delete).
-2. **How do conversations get created?** Invite by email? Pick from a user list?
-   This determines whether v1 needs any user-discovery surface at all.
-3. **Group or 1:1?** `participantIds` is modeled as an array, which permits
-   groups — but if v1 is strictly 1:1, several UI and authorization decisions
-   simplify.
+1. ~~**Conversation delete semantics.**~~ **Hide for the acting user only.** The
+   other participant keeps the conversation and history (`chats.hiddenFor`).
+2. ~~**How do conversations get created?**~~ **Permanent connect code → instant
+   friendship → explicit "Start chat".** No user-discovery surface is needed:
+   you cannot find someone without their code.
+3. ~~**Group or 1:1?**~~ **1:1 for now.** `participantIds` stays an array and the
+   `pairKey` index is sparse, so groups remain possible without a migration.
+
+### Still open
+
 4. **AI invocation trigger.** A slash command, an @mention, a button, or always-on?
 5. **AI context scope.** Does the assistant see the whole conversation including
    other users' messages? This is a privacy decision as much as a technical one.

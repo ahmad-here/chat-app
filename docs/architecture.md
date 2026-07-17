@@ -9,11 +9,24 @@ file is where they live.
 
 ## 1. Current state
 
-The repository is a **fresh `create-next-app` scaffold**. One commit; the only
-application code is [app/layout.tsx](../app/layout.tsx) and
-[app/page.tsx](../app/page.tsx). None of the features in
-[requirements.md](./requirements.md) exist yet. Everything below is design, not
-description — do not read it as a map of code that is already here.
+Auth and real-time 1:1 chat are **built and verified**. What exists:
+
+| Area | Where |
+|---|---|
+| Custom Node server + Socket.IO | [server.mts](../server.mts) |
+| Auth (credentials + Google) | [auth.ts](../auth.ts), [auth.config.ts](../auth.config.ts) |
+| Route protection | [proxy.ts](../proxy.ts) (optimistic), [lib/dal.ts](../lib/dal.ts) (real) |
+| Data access + authorization | [lib/chat-data.ts](../lib/chat-data.ts) |
+| Connect codes | [lib/connect-code.ts](../lib/connect-code.ts) |
+| Indexes | [lib/indexes.ts](../lib/indexes.ts), run from [instrumentation.ts](../instrumentation.ts) |
+| Socket protocol | [lib/socket-events.ts](../lib/socket-events.ts), [app/components/use-chat-socket.ts](../app/components/use-chat-socket.ts) |
+
+Verified end-to-end against a real MongoDB by `npm run verify:auth` (15 checks)
+and `npm run verify:chat` (28 checks — two real sockets exchanging a message).
+
+**Not built:** the AI assistant ([requirements.md §3.4](./requirements.md)),
+Markdown rendering and syntax highlighting, and Google OAuth is **unverified**
+pending credentials.
 
 ## 2. Decided stack
 
@@ -94,7 +107,66 @@ not see each other's connections. If this ever runs on more than one instance it
 needs a Socket.IO adapter backed by shared state to broker events between them.
 Not a v1 concern at one instance — but it is the thing that breaks first under
 horizontal scaling, and it's worth knowing now rather than discovering it during
-an incident.
+an incident. The in-memory rate limiter in [lib/rate-limit.ts](../lib/rate-limit.ts)
+has exactly the same property, for the same reason.
+
+### As built
+
+**`server.mts` — the extension is load-bearing.** Node 24 strips TypeScript types
+natively, so there is no build step (this resolves the old `server.js` vs
+`server.ts` question). But `package.json` has no `"type": "module"`, so a `.ts`
+file would load as **CommonJS** and its `import` statements would fail. `.mts` is
+unconditionally ESM.
+
+Three constraints follow, and each one fails in a way that doesn't point at the
+cause:
+
+- Node ESM needs **explicit file extensions** on relative imports, so shared
+  modules import each other as `./x.ts` (enabled by `allowImportingTsExtensions`).
+- **Never `import "server-only"`** in anything `server.mts` imports. That package
+  exists only inside Next's compiled bundle and is unresolvable in plain Node.
+  This is why [lib/chat-data.ts](../lib/chat-data.ts) omits it while
+  [lib/dal.ts](../lib/dal.ts) keeps it. The safety net is that `mongodb` cannot be
+  bundled for the browser, so a client component importing it fails at build.
+- tsconfig `paths` (`@/…`) don't resolve — Node never reads tsconfig.
+
+**Socket.IO is attached after `app.prepare()`, and the order matters.** engine.io's
+`attach()` captures the HTTP server's existing `upgrade` listeners, removes them,
+and installs one that delegates non-matching paths back. Attach before Next has
+registered its dev HMR listener and there is nothing to capture — HMR then breaks
+silently, with no error, just a dev server that stops hot-reloading. Paths don't
+collide (`/socket.io` vs `/_next/webpack-hmr`), and engine.io intercepts its own
+path before Next's handler runs — verified: `/socket.io/?EIO=4` returns a
+handshake, not a login redirect.
+
+**Handshake auth.** The session JWT is **encrypted** (JWE, A256CBC-HS512), so
+`jsonwebtoken` cannot read it — only Auth.js's own `getToken`. It needs a `req`
+but reads only `.headers`, so the handshake headers suffice.
+
+> **The trap:** `secureCookie` must be derived from **AUTH_URL's protocol, not
+> `NODE_ENV`**. Auth.js picks the cookie name from `url.protocol === "https:"`,
+> and the decryption **salt is derived from that same cookie name**. Guess wrong
+> and both the name and the salt are wrong, so `getToken` returns `null` and
+> every socket silently fails to authenticate. Keying off `NODE_ENV` — the
+> obvious guess — breaks the moment production runs behind http, or dev over
+> https.
+
+**Message flow.** Client emits `message:send` → server re-checks membership and
+persists → server broadcasts `message:new` to the room **including the author**.
+The author's client does **not** insert optimistically: rendering only from the
+server echo means exactly one code path puts a message on screen, which removes
+the duplicate-message bug by construction rather than by deduplication.
+
+**Room authorization.** One room per conversation, name derived from the id. A
+`chat:join` is a *request*: the server checks `participantIds` in the database
+before honouring it, and answers with an ack so the client knows it was refused.
+Verified — a non-participant is refused the room and receives nothing.
+
+**The reconnection gap.** Socket.IO reconnects transparently, which is precisely
+what makes this easy to miss: rejoining a room does **not** backfill what was
+missed while offline, so the connection looks healthy while the client sits on a
+hole in its history. The client refetches `/api/chats/[chatId]/messages` on every
+`connect` (not just the first).
 
 ## 4. Auth
 
@@ -175,8 +247,35 @@ adapter docs show.
 - `chats.participantIds` — every authorization check reads it.
 - `messages.{chatId, createdAt}` — compound, serves history reads and ordering.
 
-**Whether to use an ODM (Mongoose) or the raw driver is undecided.** The Auth.js
-adapter wants a raw `MongoClient`, so a Mongoose-only setup means running both.
+**Resolved: the raw driver, no ODM.** The Auth.js adapter wants a raw
+`MongoClient`, so adding Mongoose would mean running both. Collection types are
+enforced with the driver's generics (`collection<ChatDoc>(…)`) and the persistence
+shapes in [lib/types.ts](../lib/types.ts).
+
+**One pool, via `globalThis`.** The cache in [lib/mongodb.ts](../lib/mongodb.ts) is
+unconditional, not dev-only. Dev needs it because hot reload re-evaluates the
+module and would leak a pool per edit. Production needs it too now: the custom
+server runs *outside* Next's bundle, so Node's module graph and Turbopack's each
+hold their own instance of that file — two instances, two pools in one process,
+unless they meet on `globalThis`.
+
+### Correctness lives in the indexes, not the code
+
+Every "does this already exist?" check races: two concurrent requests both read
+"no" before either writes. Application logic cannot close that window; a unique
+index can. So each of these is enforced by the database and the code simply
+handles the duplicate-key rejection:
+
+| Invariant | Index |
+|---|---|
+| One account per email | `users.email` unique |
+| One code per user, unique across users | `users.connectCode` unique + sparse |
+| One friendship per pair | `friendships.{userA, userB}` unique, canonically ordered |
+| One 1:1 chat per pair | `chats.pairKey` unique + sparse |
+
+Sparse matters twice: connect codes are assigned lazily and chats may later be
+groups — without it, every document still lacking the field would collide on
+`null` and only the first would ever insert.
 
 ## 6. AI integration
 
@@ -242,12 +341,17 @@ Two things to settle at deploy time, neither blocking now:
 
 ## 9. Open decisions
 
-Ordered by how much they block. Transport and hosting are now resolved (§3, §8).
+Resolved: transport and hosting (§3, §8), `server.mts` (§3), delete semantics and
+conversation creation ([requirements.md §6](./requirements.md#6-open-questions)),
+ODM vs raw driver (§5).
 
-1. **Delete semantics** — for-everyone vs for-me changes the `chats` schema.
-   See [requirements.md §6](./requirements.md#6-open-questions).
-2. **`server.js` vs `server.ts`** (§3) — the entrypoint is outside the Next
-   compiler, so TypeScript there needs its own compile step or a loader. Settle
-   when the file is written.
-3. **ODM vs raw driver** (§5).
-4. **AI context scope and streaming fan-out** (§6).
+Still open:
+
+1. **AI context scope and streaming fan-out** (§6) — the assistant isn't built.
+2. **Connect-code rotation.** Codes are permanent and cannot currently be
+   revoked. A `regenerate` action is the obvious extension; deferred because
+   nothing depends on it yet.
+3. **Email verification** — still absent, and still the reason Google accounts
+   aren't auto-linked to password accounts (§4).
+4. **Multi-instance scaling** — needs a Socket.IO adapter and shared rate-limit
+   storage (§3). Not a concern at one instance.

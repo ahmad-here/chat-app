@@ -3,11 +3,12 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev",
+    "dev": "node server.mts",
     "build": "next build",
-    "start": "next start",
+    "start": "cross-env NODE_ENV=production node server.mts",
     "lint": "eslint",
-    "verify:auth": "node scripts/verify-auth.mjs"
+    "verify:auth": "node scripts/verify-auth.mjs",
+    "verify:chat": "node scripts/verify-chat.mjs"
   },
   "dependencies": {
     "@auth/mongodb-adapter": "^3.11.2",
@@ -16,13 +17,16 @@
     "next": "16.2.10",
     "next-auth": "^5.0.0-beta.31",
     "react": "19.2.4",
-    "react-dom": "19.2.4"
+    "react-dom": "19.2.4",
+    "socket.io": "^4.8.3",
+    "socket.io-client": "^4.8.3"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "cross-env": "^10.1.0",
     "eslint": "^9",
     "eslint-config-next": "16.2.10",
     "mongodb-memory-server": "^11.2.0",
