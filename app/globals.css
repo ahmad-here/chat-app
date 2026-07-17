@@ -1,26 +1,106 @@
 @import "tailwindcss";
 
+/* Theme tokens.
+ *
+ * Three-state theming: no [data-theme] follows the OS; an explicit
+ * [data-theme="light"|"dark"] overrides it. The inline script in layout.tsx
+ * sets the attribute before first paint. See docs/ui-guidelines.md.
+ *
+ * Components must use the semantic utilities (bg-surface, text-muted, ...)
+ * rather than literal colors, or they only work in one theme. */
+
 :root {
   --background: #ffffff;
   --foreground: #171717;
+
+  /* Elevation: background < surface < raised */
+  --surface: #f7f7f8;
+  --raised: #ffffff;
+
+  --border: #e4e4e7;
+  --muted: #6b7280;
+  --accent: #4f46e5;
+  --accent-foreground: #ffffff;
+
+  --bubble-own: #4f46e5;
+  --bubble-own-foreground: #ffffff;
+  --bubble-other: #f0f0f2;
+  --bubble-other-foreground: #171717;
+  --bubble-ai: #ecfdf5;
+  --bubble-ai-foreground: #064e3b;
 }
 
+/* OS preference — applies only when no explicit choice has been made. */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --background: #0a0a0a;
+    --foreground: #ededed;
+
+    --surface: #141416;
+    --raised: #1c1c1f;
+
+    --border: #2a2a2e;
+    --muted: #9ca3af;
+    --accent: #6366f1;
+    --accent-foreground: #ffffff;
+
+    --bubble-own: #4f46e5;
+    --bubble-own-foreground: #ffffff;
+    --bubble-other: #1c1c1f;
+    --bubble-other-foreground: #ededed;
+    --bubble-ai: #0f2e21;
+    --bubble-ai-foreground: #a7f3d0;
+  }
+}
+
+/* Explicit choice — wins over the OS preference. */
+[data-theme="dark"] {
+  --background: #0a0a0a;
+  --foreground: #ededed;
+
+  --surface: #141416;
+  --raised: #1c1c1f;
+
+  --border: #2a2a2e;
+  --muted: #9ca3af;
+  --accent: #6366f1;
+  --accent-foreground: #ffffff;
+
+  --bubble-own: #4f46e5;
+  --bubble-own-foreground: #ffffff;
+  --bubble-other: #1c1c1f;
+  --bubble-other-foreground: #ededed;
+  --bubble-ai: #0f2e21;
+  --bubble-ai-foreground: #a7f3d0;
+}
+
+/* Tailwind v4 is configured here, not in a config file. Each --color-* entry
+ * generates the matching utilities (--color-surface -> bg-surface, etc.). */
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
+  --color-surface: var(--surface);
+  --color-raised: var(--raised);
+  --color-border: var(--border);
+  --color-muted: var(--muted);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+
+  --color-bubble-own: var(--bubble-own);
+  --color-bubble-own-foreground: var(--bubble-own-foreground);
+  --color-bubble-other: var(--bubble-other);
+  --color-bubble-other-foreground: var(--bubble-other-foreground);
+  --color-bubble-ai: var(--bubble-ai);
+  --color-bubble-ai-foreground: var(--bubble-ai-foreground);
+
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
-}
-
+/* Was `font-family: Arial, Helvetica, sans-serif`, which overrode the Geist
+ * fonts loaded in layout.tsx and made that download dead weight. */
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-sans);
 }
